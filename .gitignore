@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# 模型權重與訓練產物（勿提交，請用 Git LFS 或外部儲存）
+*.pt
+runs/
+*.cache
+labels.cache
+
+# 資料集（含影像與外洩絕對路徑，勿提交）
+dataset/
+images/
+sorted_output/
+
+# 環境
+.env
+
+# Windows
+Thumbs.db
+Desktop.ini
+nu1

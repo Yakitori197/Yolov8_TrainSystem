@@ -1,0 +1,26 @@
+{
+  "version": "4.5.6",
+  "flags": {},
+  "shapes": [
+    {
+      "label": "NG",
+      "points": [
+        [
+          946.0,
+          544.0
+        ],
+        [
+          1423.0,
+          763.0
+        ]
+      ],
+      "group_id": null,
+      "shape_type": "rectangle",
+      "flags": {}
+    }
+  ],
+  "imagePath": "product_20251002_150507_077311_cam2.png",
+  "imageData": null,
+  "imageHeight": 1080,
+  "imageWidth": 1920
+}

@@ -1,0 +1,41 @@
+camera_settings:
+  camera_names:
+  - 鏡頭1 - 主視角
+  - 鏡頭2 - 側視角
+  - 鏡頭3 - 頂視角
+  - 鏡頭4 - 底視角
+  - 鏡頭5 - 左視角
+  - 鏡頭6 - 右視角
+  - 鏡頭7 - 細節視角
+  capture_format: png
+  fps: 30
+  resolution:
+    height: 1080
+    width: 1920
+detection_settings:
+  auto_sort: true
+  confidence_threshold: 0.5
+  result_format: both
+  save_results: true
+  sorted_output_dir: sorted_output
+object_classes:
+  bicycle: 自行車
+  bird: 鳥
+  bus: 公車
+  car: 車輛
+  cat: 貓
+  dog: 狗
+  motorcycle: 機車
+  other: 其他
+  person: 人物
+  truck: 卡車
+preview_settings:
+  enhanced_preview: true
+  max_preview_height: 720
+  max_preview_width: 1280
+  preview_scale_factor: 1.5
+training_settings:
+  data_split_ratio: 0.8
+  default_batch_size: 16
+  default_epochs: 100
+  default_img_size: 640
