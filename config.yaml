@@ -1,4 +1,5 @@
 camera_settings:
+  max_cameras: 12
   camera_names:
   - 鏡頭1 - 主視角
   - 鏡頭2 - 側視角
@@ -12,28 +13,30 @@ camera_settings:
   resolution:
     height: 1080
     width: 1920
+
 detection_settings:
   auto_sort: true
   confidence_threshold: 0.5
   result_format: both
   save_results: true
   sorted_output_dir: sorted_output
+
+# 標註用的類別清單。
+# 必須是「清單」格式（程式以索引／append／index 操作）；
+# 也接受 {鍵: 顯示名} 字典，載入時會自動取鍵轉成清單。
+# 批次分檔另以「載入模型自身的類別名稱」為準，不受此清單影響。
 object_classes:
-  bicycle: 自行車
-  bird: 鳥
-  bus: 公車
-  car: 車輛
-  cat: 貓
-  dog: 狗
-  motorcycle: 機車
-  other: 其他
-  person: 人物
-  truck: 卡車
+- object
+- defect
+- good
+- bad
+
 preview_settings:
   enhanced_preview: true
   max_preview_height: 720
   max_preview_width: 1280
   preview_scale_factor: 1.5
+
 training_settings:
   data_split_ratio: 0.8
   default_batch_size: 16

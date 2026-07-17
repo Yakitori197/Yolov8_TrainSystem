@@ -67,12 +67,14 @@ class USBLearningApp:
         self.sorted_output_dir = self.base_dir / "sorted_output"
         self.dataset_root = self.base_dir / "dataset"
 
-        # 預設設定
+        # 預設設定（config.yaml 存在時會覆蓋這些值，見 _load_config）
         self.config = {
             "camera_settings": {
                 "max_cameras": 12,
                 "camera_names": [],
-                "capture_format": "png"
+                "capture_format": "png",
+                "resolution": {"width": 1920, "height": 1080},
+                "fps": 30
             },
             "training_settings": {
                 "default_epochs": 100,
@@ -86,6 +88,10 @@ class USBLearningApp:
             },
             "object_classes": ["object", "defect", "good", "bad"]
         }
+
+        # 實際載入 config.yaml 覆蓋預設值。
+        # 此檔原本從未被讀取（設定全寫死在上面），改 config.yaml 完全沒作用且不報錯。
+        self._load_config()
 
         # 攝影機狀態
         self.available_cameras = []
@@ -206,6 +212,66 @@ class USBLearningApp:
         else:
             self.status_container.pack_forget()
 
+    # ---------------- 設定載入 ----------------
+
+    def _load_config(self, path=None) -> None:
+        """
+        載入 config.yaml 覆蓋預設設定。
+
+        檔案不存在或格式錯誤時沿用預設值並提示，不讓程式崩潰。
+        """
+        cfg_path = Path(path) if path else (self.base_dir / "config.yaml")
+        if not cfg_path.exists():
+            return
+        try:
+            data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            print(f"[config] config.yaml 格式錯誤，沿用預設設定：{e}")
+            return
+        if not isinstance(data, dict):
+            print("[config] config.yaml 內容不是對應表，沿用預設設定")
+            return
+
+        data = dict(data)
+        # object_classes 相容處理：程式內部一律當「清單」使用。
+        # 早期範本把它寫成 {英文: 中文} 字典，若直接載入，[0] 與 .append() 會出錯。
+        if "object_classes" in data:
+            data["object_classes"] = _normalize_classes(data["object_classes"])
+            if not data["object_classes"]:
+                del data["object_classes"]  # 空的就不要覆蓋預設
+
+        self.config = _deep_merge(self.config, data)
+
+    def _camera_params(self):
+        """回傳 (寬, 高, fps)，皆取自設定而非寫死。"""
+        cam = self.config.get("camera_settings", {})
+        res = cam.get("resolution", {}) or {}
+        return (
+            int(res.get("width", 1920)),
+            int(res.get("height", 1080)),
+            int(cam.get("fps", 30)),
+        )
+
+    def _ui_message(self, kind: str, title: str, msg: str) -> None:
+        """
+        從背景執行緒安全地顯示對話框。
+
+        Tkinter 只能在主執行緒操作；直接在 worker thread 呼叫 messagebox
+        可能導致 Tk 崩潰，故一律經由 root.after 排回主執行緒。
+        """
+        if not self.use_gui:
+            print(f"[{kind}] {title}: {msg}")
+            return
+        fn = {
+            "error": messagebox.showerror,
+            "info": messagebox.showinfo,
+            "warning": messagebox.showwarning,
+        }.get(kind, messagebox.showinfo)
+        try:
+            self.root.after(0, lambda: fn(title, msg))
+        except Exception:
+            pass
+
     def detect_cameras(self):
         if not OPENCV_AVAILABLE:
             messagebox.showerror("錯誤", "未安裝 OpenCV"); return
@@ -215,9 +281,10 @@ class USBLearningApp:
             try:
                 cap = cv2.VideoCapture(i)
                 if not cap.isOpened(): continue
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-                cap.set(cv2.CAP_PROP_FPS, 60)
+                cam_w, cam_h, cam_fps = self._camera_params()  # 取自設定，不再寫死
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, cam_w)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cam_h)
+                cap.set(cv2.CAP_PROP_FPS, cam_fps)
                 actual_fps = int(cap.get(cv2.CAP_PROP_FPS))
                 if actual_fps <= 0:
                     actual_fps = 30
@@ -275,9 +342,10 @@ class USBLearningApp:
         cap = cv2.VideoCapture(index)
         if not cap.isOpened():
             messagebox.showwarning("警告", f"攝影機 {index+1} 無法開啟"); return
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-        cap.set(cv2.CAP_PROP_FPS, 60)
+        cam_w, cam_h, cam_fps = self._camera_params()  # 取自設定，不再寫死
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, cam_w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cam_h)
+        cap.set(cv2.CAP_PROP_FPS, cam_fps)
         self.active_cameras[index] = cap
         self.camera_queues[index] = queue.Queue(maxsize=2)
         self.camera_frames[index] = None
@@ -1279,6 +1347,33 @@ class USBLearningApp:
         except Exception:
             pass
 
+    def _register_train_callbacks(self, total_epochs: int) -> None:
+        """
+        以 ultralytics callback 回報逐 epoch 進度，並讓停止旗標真正生效。
+
+        原本 train_stop_flag 只有 set()、沒有任何地方檢查，按「停止訓練」不會有作用；
+        進度也只在 0/10/100 更新，並非逐 epoch。
+
+        callback 內一律吞例外：回呼失敗不可影響訓練本身（最差退回原本行為）。
+        """
+        def _on_epoch_end(trainer):
+            try:
+                epoch = int(getattr(trainer, "epoch", 0)) + 1
+                pct = 10 + int(85 * epoch / max(1, total_epochs))
+                self._set_progress(pct, f"EPOCH {epoch}/{total_epochs}")
+                if self.train_stop_flag.is_set():
+                    self.append_log("收到停止要求，將在本 epoch 結束後停止訓練")
+                    # ultralytics 的早停旗標（不同版本命名略有差異，兩者都設）
+                    trainer.stop = True
+                    trainer.stop_training = True
+            except Exception:
+                pass
+
+        try:
+            self.yolo_model.add_callback("on_train_epoch_end", _on_epoch_end)
+        except Exception as e:
+            self.append_log(f"註冊訓練回呼失敗（進度/停止功能可能不可用）：{e}")
+
     def _train_worker(self, model_name="yolov8n.pt", epochs=100, imgsz=640, batch=16):
         try:
             self._set_progress(0, "正在初始化...")
@@ -1292,14 +1387,14 @@ class USBLearningApp:
             train_label_dir = self.dataset_root / "train" / "labels"
             if not train_img_dir.exists():
                 self.append_log("錯誤: train/images 資料夾不存在！")
-                messagebox.showerror("錯誤", "請先執行「準備資料集」")
+                self._ui_message("error", "錯誤", "請先執行「準備資料集」")
                 return
             train_images = list(train_img_dir.glob("*.[jp][pn][g]*"))
             train_labels = list(train_label_dir.glob("*.txt"))
             if len(train_images) == 0:
                 self.append_log("錯誤: 訓練集沒有影像！")
                 self.append_log(f"檢查路徑: {train_img_dir}")
-                messagebox.showerror("錯誤", 
+                self._ui_message("error", "錯誤",
                     "訓練集為空！\n\n"
                     "請確認:\n"
                     "1. images/ 資料夾有影像檔\n"
@@ -1308,7 +1403,7 @@ class USBLearningApp:
                 return
             if len(train_labels) == 0:
                 self.append_log("錯誤: 訓練集沒有標註檔！")
-                messagebox.showerror("錯誤", "請先在「標註作業」標註影像")
+                self._ui_message("error", "錯誤", "請先在「標註作業」標註影像")
                 return
             self.append_log(f"✓ 發現 {len(train_images)} 張訓練影像")
             self.append_log(f"✓ 發現 {len(train_labels)} 個標註檔")
@@ -1331,6 +1426,8 @@ class USBLearningApp:
                 self.append_log("未安裝 PyTorch，使用 CPU 模式")
             self.append_log(f"載入預訓練模型：{model_name}")
             self.yolo_model = YOLO(model_name)
+            # 註冊 epoch 回呼：逐 epoch 回報進度，並讓「停止訓練」真正生效
+            self._register_train_callbacks(epochs)
             self.append_log(f"開始訓練 - 資料集：{data_yaml}")
             self.append_log(f"訓練參數 - Epochs: {epochs}, 影像大小: {imgsz}, 批次大小: {batch}")
             self.append_log(f"使用設備：{device.upper()}")
@@ -1402,8 +1499,10 @@ class USBLearningApp:
         self.train_thread.start()
 
     def stop_training(self):
+        if self.train_thread is None:
+            messagebox.showinfo("提示", "目前沒有進行中的訓練"); return
         self.train_stop_flag.set()
-        self.append_log("已送出停止要求。如需立即停止，請直接關閉視窗或中斷程序。")
+        self.append_log("已送出停止要求，將在目前這個 epoch 結束後停止訓練。")
 
     def load_model(self):
         p = filedialog.askopenfilename(title="選擇 YOLO 權重檔", filetypes=[("YOLO PT", "*.pt"), ("All Files", "*.*")], initialdir=str(self.models_dir))
@@ -1736,6 +1835,31 @@ class USBLearningApp:
             self.stop_preview_loop()
         finally:
             self.root.destroy()
+
+
+def _normalize_classes(value):
+    """
+    object_classes 正規化為清單。
+
+    接受 list（["object", "defect"]）或 dict（{"person": "人物"}，取 key），
+    其他型別視為未設定。程式內部一律以清單操作（索引 / append / index）。
+    """
+    if isinstance(value, dict):
+        return [str(k) for k in value.keys()]
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value]
+    return []
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """遞迴合併設定：override 有的覆蓋，沒有的沿用 base。"""
+    out = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
 
 
 def main():
