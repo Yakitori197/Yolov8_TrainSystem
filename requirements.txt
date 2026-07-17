@@ -1,0 +1,24 @@
+# YOLOv8 訓練系統相依套件
+# 皆設版本上限，避免日後重裝時解析到破壞相容性的新主版本
+# 安裝：pip install -r requirements.txt
+
+# 數值運算
+numpy>=1.26,<3
+
+# 影像處理（程式使用 cv2 4.x API，故上限鎖在 5）
+opencv-python>=4.10,<5
+
+# GUI 影像顯示
+pillow>=10.3,<13
+
+# 設定檔解析
+PyYAML>=6.0,<7
+
+# YOLOv8 框架
+ultralytics>=8.3,<9
+
+# 深度學習框架（CPU 版）
+# 如需 GPU 加速，請改用官方 CUDA 索引安裝：
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+torch>=2.2,<3
+torchvision>=0.17,<1
